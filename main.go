@@ -25,6 +25,16 @@ func main() {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
 
+	redisClient, err := config.NewRedisClient()
+	if err != nil {
+		log.Printf("Warning: Failed to connect to Redis: %v", err)
+		log.Println("Continuing without Redis cache...")
+	} else {
+		config.RedisClient = redisClient
+		defer redisClient.Close()
+		log.Println("Successfully connected to Redis")
+	}
+
 	// Setup and start server
 	app := fiber.New(fiber.Config{
 		Prefork:        os.Getenv("ENVIRONMENT") == "production",
