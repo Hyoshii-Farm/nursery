@@ -2,7 +2,6 @@ package config
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"log"
 	"os"
@@ -38,10 +37,9 @@ func NewRedisClient() (*redis.Client, error) {
 	}
 
 	client := redis.NewClient(&redis.Options{
-		Addr:      fmt.Sprintf("%s:%s", cfg.Host, cfg.Port),
-		Password:  cfg.Password,
-		DB:        cfg.DB,
-		TLSConfig: &tls.Config{},
+		Addr:     fmt.Sprintf("%s:%s", cfg.Host, cfg.Port),
+		Password: cfg.Password,
+		DB:       cfg.DB,
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

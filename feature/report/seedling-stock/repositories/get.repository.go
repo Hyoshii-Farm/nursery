@@ -8,9 +8,26 @@ import (
 	model "github.com/Hyoshii-Farm/nursery/feature/report/seedling-stock/models"
 )
 
-const pageLimit = 10
+const (
+	pageLimit    = 10
+	deadlineDays = 60 * 7 // seedling growth deadline in days +60 weeks
+)
 
-// sumQuantity sums the quantity of a specific action within a date range
+const latestPlantingHistoryCTE = `
+	JOIN (
+		SELECT DISTINCT ON (location_id)
+			location_id,
+			variant_id,
+			planting_date
+		FROM "PlantingHistory"
+		WHERE action = 'INITIAL'
+		  AND deleted_at IS NULL
+		  AND is_active = TRUE
+		ORDER BY location_id, planting_date DESC, id DESC
+	) ph ON ph.location_id = l.id
+`
+
+// sumQuantity sums the quantity of a specific action within a date range.
 func (r *Repository) sumQuantity(
 	action string,
 	start time.Time,
@@ -27,7 +44,7 @@ func (r *Repository) sumQuantity(
 	return total, err
 }
 
-// calcGap calculates the gap percentage between two values
+// calcGap calculates the gap percentage between two values.
 func calcGap(current, last int64) float64 {
 	if last == 0 {
 		return 0
@@ -36,15 +53,14 @@ func calcGap(current, last int64) float64 {
 	return math.Round(raw*100) / 100
 }
 
-// GetKPI retrieves KPI metrics for the report
+// GetKPI retrieves KPI metrics for the report.
 func (r *Repository) GetKPI(startDate, endDate string, variantIDs []uint, before bool) (model.KPI, error) {
-
 	var kpi model.KPI
+
 	// NOTE: variantIDs and before are reserved for future KPI filtering
 	_ = variantIDs
 	_ = before
 
-	// Parse dates (YYYY-MM-DD)
 	start, err := time.Parse("2006-01-02", startDate)
 	if err != nil {
 		return kpi, err
@@ -55,9 +71,10 @@ func (r *Repository) GetKPI(startDate, endDate string, variantIDs []uint, before
 	}
 
 	// KPI comparison uses fixed bi-weekly (14-day) periods
-	period := 14 * 24 * time.Hour
-	lastStart := start.Add(-period)
+	duration := end.Sub(start)
+	lastStart := start.Add(-duration)
 	lastEnd := start
+
 	type kpiTarget struct {
 		action string
 		target *model.KPIMetric
@@ -88,8 +105,9 @@ func (r *Repository) GetKPI(startDate, endDate string, variantIDs []uint, before
 	return kpi, nil
 }
 
-// GetSeedByVariant retrieves seed data grouped by variant
-func (r *Repository) GetSeedByVariant(startDate, endDate string, variantIDs []uint) ([]model.SeedByVariant, error) {
+// GetSeedByVariant retrieves seed data grouped by variant.
+// Only active variants (is_active = TRUE) are included.
+func (r *Repository) GetSeedByVariant(endDate string, variantIDs []uint) ([]model.SeedByVariant, error) {
 	var needs []struct {
 		VariantID   uint
 		VariantName string
@@ -103,19 +121,10 @@ func (r *Repository) GetSeedByVariant(startDate, endDate string, variantIDs []ui
 			v.name AS variant_name,
 			SUM(l.capacity) AS need_qty
 		`).
-		Joins(`
-			JOIN (
-				SELECT DISTINCT ON (location_id)
-					location_id,
-					variant_id
-				FROM "PlantingHistory"
-				WHERE action = 'INITIAL'
-				  AND deleted_at IS NULL
-				  AND is_active = TRUE
-				ORDER BY location_id, planting_date DESC, id DESC
-			) ph ON ph.location_id = l.id
-		`).
+		Joins(latestPlantingHistoryCTE).
 		Joins(`JOIN "Variant" v ON v.id = ph.variant_id`).
+		Where("v.is_active = TRUE").
+		Where("l.is_active = TRUE").
 		Group("v.id, v.name")
 
 	if len(variantIDs) > 0 {
@@ -127,17 +136,17 @@ func (r *Repository) GetSeedByVariant(startDate, endDate string, variantIDs []ui
 	}
 
 	// 2. Get available stock per variant
-	available, err := r.GetAvailableSeed(variantIDs)
+	available, err := r.GetAvailableSeed(endDate, variantIDs)
 	if err != nil {
 		return nil, err
 	}
 
-	availMap := make(map[string]int)
+	availMap := make(map[string]int, len(available))
 	for _, a := range available {
 		availMap[a.VariantName] = a.AvailableQuantity
 	}
 
-	// 3. Merge
+	// 3. Merge need and available data
 	result := make([]model.SeedByVariant, 0, len(needs))
 	for _, n := range needs {
 		avail := availMap[n.VariantName]
@@ -152,8 +161,9 @@ func (r *Repository) GetSeedByVariant(startDate, endDate string, variantIDs []ui
 	return result, nil
 }
 
-// GetSeedByLocation retrieves seed data grouped by location
-func (r *Repository) GetSeedByLocation(startDate, endDate string, variantIDs []uint, locationIDs []uint) ([]model.SeedByLocation, error) {
+// GetSeedByLocation retrieves seed data grouped by location.
+// Only active locations (is_active = TRUE) and active variants are included.
+func (r *Repository) GetSeedByLocation(endDate string, variantIDs []uint, locationIDs []uint) ([]model.SeedByLocation, error) {
 	var rows []struct {
 		LocationName string
 		VariantName  string
@@ -168,20 +178,10 @@ func (r *Repository) GetSeedByLocation(startDate, endDate string, variantIDs []u
 			l.capacity AS need_qty,
 			ph.planting_date AS planting_date
 		`).
-		Joins(`
-			JOIN (
-				SELECT DISTINCT ON (location_id)
-					location_id,
-					variant_id,
-					planting_date
-				FROM "PlantingHistory"
-				WHERE action = 'INITIAL'
-				  AND deleted_at IS NULL
-				  AND is_active = TRUE
-				ORDER BY location_id, planting_date DESC, id DESC
-			) ph ON ph.location_id = l.id
-		`).
-		Joins(`JOIN "Variant" v ON v.id = ph.variant_id`)
+		Joins(latestPlantingHistoryCTE).
+		Joins(`JOIN "Variant" v ON v.id = ph.variant_id`).
+		Where("l.is_active = TRUE").
+		Where("v.is_active = TRUE")
 
 	if len(variantIDs) > 0 {
 		query = query.Where("v.id IN ?", variantIDs)
@@ -194,26 +194,26 @@ func (r *Repository) GetSeedByLocation(startDate, endDate string, variantIDs []u
 		return nil, err
 	}
 
-	// Ambil available per variant
-	available, err := r.GetAvailableSeed(variantIDs)
+	// Get available stock per variant
+	available, err := r.GetAvailableSeed(endDate, variantIDs)
 	if err != nil {
 		return nil, err
 	}
 
-	availMap := make(map[string]int)
+	availMap := make(map[string]int, len(available))
 	for _, a := range available {
 		availMap[a.VariantName] = a.AvailableQuantity
 	}
 
-	// Merge
+	// Merge and calculate deadline
 	now := time.Now()
 	result := make([]model.SeedByLocation, 0, len(rows))
 
 	for _, row := range rows {
 		avail := availMap[row.VariantName]
 
-		deadlineDate := row.PlantingDate.AddDate(0, 0, 60*7)
-		deadlineDays := int(deadlineDate.Sub(now).Hours() / 24)
+		deadlineDate := row.PlantingDate.AddDate(0, 0, deadlineDays)
+		daysLeft := int(deadlineDate.Sub(now).Hours() / 24)
 
 		result = append(result, model.SeedByLocation{
 			LocationName:      row.LocationName,
@@ -221,9 +221,10 @@ func (r *Repository) GetSeedByLocation(startDate, endDate string, variantIDs []u
 			AvailableQuantity: avail,
 			GapQuantity:       avail - row.NeedQty,
 			PlantingDate:      row.PlantingDate.Format("2006-01-02"),
-			Deadline:          deadlineDays,
+			Deadline:          daysLeft,
 		})
 	}
+
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].Deadline < result[j].Deadline
 	})
@@ -231,36 +232,63 @@ func (r *Repository) GetSeedByLocation(startDate, endDate string, variantIDs []u
 	return result, nil
 }
 
-// GetAvailableSeed retrieves available seed quantities by variant
-func (r *Repository) GetAvailableSeed(variantIDs []uint) ([]model.AvailableSeed, error) {
+// GetAvailableSeed retrieves available seed quantities by variant.
+// Only active variants (is_active = TRUE) are included.
+func (r *Repository) GetAvailableSeed(endDate string, variantIDs []uint) ([]model.AvailableSeed, error) {
 	var result []model.AvailableSeed
 
-	query := r.db.Table(`"SeedlingStock" s`).
-		Select(`
-			v.name AS variant_name,
-			SUM(
-				CASE
-					WHEN s.action = 'INITIAL' THEN s.quantity
-					WHEN s.action = 'ADD' THEN s.quantity
-					WHEN s.action IN ('TAKEN','DEAD') THEN -s.quantity
-					ELSE 0
-				END
-			) AS available_quantity
-		`).
-		Joins(`JOIN "Variant" v ON v.id = s.variant_id`).
-		Where("s.deleted_at IS NULL").
-		Where("s.is_active = TRUE").
-		Group("v.name")
+	baseQuery := `
+	WITH latest_initial AS (
+		SELECT DISTINCT ON (variant_id)
+			variant_id,
+			datetime,
+			id,
+			quantity
+		FROM "SeedlingStock"
+		WHERE action = 'INITIAL'
+		  AND deleted_at IS NULL
+		  AND is_active = TRUE
+		  AND datetime <= ?
+		ORDER BY variant_id, datetime DESC, id DESC
+	)
+	SELECT 
+		v.name AS variant_name,
+		SUM(
+			CASE
+				WHEN s.action = 'INITIAL' THEN s.quantity
+				WHEN s.action = 'ADD' THEN s.quantity
+				WHEN s.action IN ('TAKEN','DEAD') THEN -s.quantity
+				ELSE 0
+			END
+		) AS available_quantity
+	FROM latest_initial li
+	JOIN "SeedlingStock" s 
+		ON s.variant_id = li.variant_id
+		AND (
+			s.datetime > li.datetime
+			OR (s.datetime = li.datetime AND s.id >= li.id)
+		)
+	JOIN "Variant" v ON v.id = s.variant_id
+	WHERE s.deleted_at IS NULL
+	  AND s.is_active = TRUE
+	  AND v.is_active = TRUE
+	  AND s.datetime <= ?
+	`
+
+	args := []interface{}{endDate, endDate}
 
 	if len(variantIDs) > 0 {
-		query = query.Where("v.id IN ?", variantIDs)
+		baseQuery += " AND li.variant_id IN (?)"
+		args = append(args, variantIDs)
 	}
 
-	err := query.Scan(&result).Error
+	baseQuery += " GROUP BY v.name"
+
+	err := r.db.Raw(baseQuery, args...).Scan(&result).Error
 	return result, err
 }
 
-// GetHistory retrieves paginated history records
+// GetHistory retrieves paginated history records.
 func (r *Repository) GetHistory(
 	startDate, endDate string,
 	variantIDs []uint,
@@ -290,13 +318,13 @@ func (r *Repository) GetHistory(
 		query = query.Where("s.variant_id IN ?", variantIDs)
 	}
 
-	// total count
+	// Total count for pagination
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return history, err
 	}
 
-	// data
+	// Fetch paginated data
 	if err := query.
 		Order("s.datetime DESC").
 		Limit(pageLimit).
@@ -305,10 +333,7 @@ func (r *Repository) GetHistory(
 		return history, err
 	}
 
-	pages := int(total) / pageLimit
-	if int(total)%pageLimit != 0 {
-		pages++
-	}
+	pages := int(math.Ceil(float64(total) / float64(pageLimit)))
 
 	history.Pagination = model.Pagination{
 		Total: int(total),

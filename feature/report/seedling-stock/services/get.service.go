@@ -72,17 +72,6 @@ func (s *Service) GetReport(ctx context.Context, req model.SeedlingStockReportRe
 		return nil, err
 	}
 
-	if !req.Before {
-		needMap := make(map[string]int)
-		for _, v := range seedByVariant {
-			needMap[v.VariantName] += v.NeedQuantity
-		}
-
-		for i := range availableSeed {
-			availableSeed[i].AvailableQuantity -= needMap[availableSeed[i].VariantName]
-		}
-	}
-
 	// History is fetched directly (not cached) because it's paginated
 	// and users expect real-time data when browsing history pages.
 	history, err := s.repo.GetHistory(req.StartDate, req.EndDate, req.VariantID, req.Page)
@@ -127,31 +116,31 @@ func (s *Service) getSeedByVariantCached(ctx context.Context, req model.Seedling
 	)
 
 	return cacheGet(ctx, s.redis, key, cacheTTL, func() ([]model.SeedByVariant, error) {
-		return s.repo.GetSeedByVariant(req.StartDate, req.EndDate, req.VariantID)
+		return s.repo.GetSeedByVariant(req.EndDate, req.VariantID)
 	})
 }
 
 func (s *Service) getSeedByLocationCached(ctx context.Context, req model.SeedlingStockReportRequest) ([]model.SeedByLocation, error) {
 	key := fmt.Sprintf(
-		"seedling:seed_by_location:%s:%s:%d:%d",
-		req.StartDate,
+		"seedling:seed_by_location:%s:%d:%d",
 		req.EndDate,
 		req.VariantID,
 		req.LocationID,
 	)
 
 	return cacheGet(ctx, s.redis, key, cacheTTL, func() ([]model.SeedByLocation, error) {
-		return s.repo.GetSeedByLocation(req.StartDate, req.EndDate, req.VariantID, req.LocationID)
+		return s.repo.GetSeedByLocation(req.EndDate, req.VariantID, req.LocationID)
 	})
 }
 
 func (s *Service) getAvailableSeedCached(ctx context.Context, req model.SeedlingStockReportRequest) ([]model.AvailableSeed, error) {
 	key := fmt.Sprintf(
-		"seedling:available_seed:%v",
+		"seedling:available_seed:%s:%v",
+		req.EndDate,
 		req.VariantID,
 	)
 
 	return cacheGet(ctx, s.redis, key, cacheTTL, func() ([]model.AvailableSeed, error) {
-		return s.repo.GetAvailableSeed(req.VariantID)
+		return s.repo.GetAvailableSeed(req.EndDate, req.VariantID)
 	})
 }
