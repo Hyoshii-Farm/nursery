@@ -74,7 +74,7 @@ func (h *Handler) GetReport(c *fiber.Ctx) error {
 	req.Before = c.Query("before") == "true"
 
 	// Call service
-	result, err := h.service.GetReport(req)
+	result, err := h.service.GetReport(c.UserContext(), req)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
