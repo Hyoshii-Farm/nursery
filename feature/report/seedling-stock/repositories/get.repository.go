@@ -196,7 +196,8 @@ func (r *Repository) GetSeedByLocation(endDate string, variantIDs []uint, locati
 		Joins(`JOIN "Variant" v ON v.id = ph.variant_id`).
 		Where("l.is_active = TRUE").
 		Where("v.is_active = TRUE").
-		Where("ph.planting_date + INTERVAL '52 weeks' <= ?", end)
+		Where("ph.planting_date + INTERVAL '52 weeks' <= ?", end).
+		Order("ph.planting_date ASC")
 
 	if len(variantIDs) > 0 {
 		query = query.Where("v.id IN ?", variantIDs)
@@ -224,20 +225,31 @@ func (r *Repository) GetSeedByLocation(endDate string, variantIDs []uint, locati
 	now := end
 	result := make([]model.SeedByLocation, 0, len(rows))
 
+	// Copy available into a remaining map
+	remainingMap := make(map[string]int)
+	for k, v := range availMap {
+		remainingMap[k] = v
+	}
+
 	for _, row := range rows {
-		avail := availMap[row.VariantName]
+		remaining := remainingMap[row.VariantName]
 
 		deadlineDate := row.PlantingDate.AddDate(0, 0, deadlineDays)
 		daysLeft := int(deadlineDate.Sub(now).Hours() / 24)
 
+		gap := remaining - row.NeedQty
+
 		result = append(result, model.SeedByLocation{
 			LocationName:      row.LocationName,
 			NeedQuantity:      row.NeedQty,
-			AvailableQuantity: avail,
-			GapQuantity:       avail - row.NeedQty,
+			AvailableQuantity: remaining,
+			GapQuantity:       gap,
 			PlantingDate:      row.PlantingDate.Format("2006-01-02"),
 			Deadline:          daysLeft,
 		})
+
+		// subtract this location's need from remaining stock
+		remainingMap[row.VariantName] -= row.NeedQty
 	}
 
 	sort.Slice(result, func(i, j int) bool {
