@@ -170,6 +170,10 @@ func (r *Repository) GetSeedByLocation(endDate string, variantIDs []uint, locati
 		NeedQty      int
 		PlantingDate time.Time
 	}
+	end, err := time.Parse("2006-01-02", endDate)
+	if err != nil {
+		return nil, err
+	}
 
 	query := r.db.Table(`"Location" l`).
 		Select(`
@@ -181,7 +185,8 @@ func (r *Repository) GetSeedByLocation(endDate string, variantIDs []uint, locati
 		Joins(latestPlantingHistoryCTE).
 		Joins(`JOIN "Variant" v ON v.id = ph.variant_id`).
 		Where("l.is_active = TRUE").
-		Where("v.is_active = TRUE")
+		Where("v.is_active = TRUE").
+		Where("ph.planting_date + INTERVAL '52 weeks' <= ?", end)
 
 	if len(variantIDs) > 0 {
 		query = query.Where("v.id IN ?", variantIDs)
@@ -206,7 +211,7 @@ func (r *Repository) GetSeedByLocation(endDate string, variantIDs []uint, locati
 	}
 
 	// Merge and calculate deadline
-	now := time.Now()
+	now := end
 	result := make([]model.SeedByLocation, 0, len(rows))
 
 	for _, row := range rows {
@@ -305,7 +310,7 @@ func (r *Repository) GetHistory(
 
 	query := r.db.Table(`"public"."SeedlingStock" s`).
 		Select(`
-		s.datetime AS date,
+		TO_CHAR(s.datetime, 'DD FMMonth YYYY') AS date,
 		s.action,
 		v.name AS variant_name,
 		s.quantity,
