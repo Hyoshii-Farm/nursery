@@ -11,7 +11,13 @@ import (
 const (
 	pageLimit    = 10
 	deadlineDays = 60 * 7 // seedling growth deadline in days +60 weeks
+	dateFormat   = "2006-01-02"
 )
+
+// parseDate parses a date string using the standard date format.
+func parseDate(date string) (time.Time, error) {
+	return time.Parse(dateFormat, date)
+}
 
 const latestPlantingHistoryCTE = `
 	JOIN (
@@ -61,11 +67,11 @@ func (r *Repository) GetKPI(startDate, endDate string, variantIDs []uint, before
 	_ = variantIDs
 	_ = before
 
-	start, err := time.Parse("2006-01-02", startDate)
+	start, err := parseDate(startDate)
 	if err != nil {
 		return kpi, err
 	}
-	end, err := time.Parse("2006-01-02", endDate)
+	end, err := parseDate(endDate)
 	if err != nil {
 		return kpi, err
 	}
@@ -113,7 +119,10 @@ func (r *Repository) GetSeedByVariant(endDate string, variantIDs []uint) ([]mode
 		VariantName string
 		NeedQty     int
 	}
-
+	end, err := parseDate(endDate)
+	if err != nil {
+		return nil, err
+	}
 	// 1. Get need per variant (capacity-based)
 	needQuery := r.db.Table(`"Location" l`).
 		Select(`
@@ -125,6 +134,7 @@ func (r *Repository) GetSeedByVariant(endDate string, variantIDs []uint) ([]mode
 		Joins(`JOIN "Variant" v ON v.id = ph.variant_id`).
 		Where("v.is_active = TRUE").
 		Where("l.is_active = TRUE").
+		Where("ph.planting_date + INTERVAL '52 weeks' <= ?", end).
 		Group("v.id, v.name")
 
 	if len(variantIDs) > 0 {
@@ -170,7 +180,7 @@ func (r *Repository) GetSeedByLocation(endDate string, variantIDs []uint, locati
 		NeedQty      int
 		PlantingDate time.Time
 	}
-	end, err := time.Parse("2006-01-02", endDate)
+	end, err := parseDate(endDate)
 	if err != nil {
 		return nil, err
 	}
