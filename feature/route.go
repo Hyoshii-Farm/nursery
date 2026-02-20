@@ -12,7 +12,7 @@ import (
 
 func RegisterAll(api fiber.Router, db *gorm.DB) {
 	seedlingstock.Register(api.Group("/seedling-stock"), db)
-	predator.Register(api.Group("/predator"), db)
+	predator.Register(api.Group("/report/predator-stock"), db)
 
 	// Health check endpoint
 	api.Get("/health", test.HealthCheck)

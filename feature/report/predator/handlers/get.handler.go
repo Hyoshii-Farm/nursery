@@ -1,16 +1,38 @@
 package predator
 
 import (
+	model "github.com/Hyoshii-Farm/nursery/feature/report/predator/models"
+
 	"github.com/gofiber/fiber/v2"
 )
 
 func (h *Handler) GetReport(c *fiber.Ctx) error {
-	startDate := c.Query("start_date")
-	endDate := c.Query("end_date")
+	req := new(model.PredatorPageRequest)
 
-	result, err := h.service.GetReport(startDate, endDate)
+	if err := c.QueryParser(req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Cannot parse query parameters",
+		})
+	}
+
+	if err := req.Validate(); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	query, err := req.ToQuery()
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).SendString(err.Error())
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	result, err := h.service.GetReport(query)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
 	}
 
 	return c.JSON(result)
