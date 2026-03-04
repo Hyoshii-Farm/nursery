@@ -40,16 +40,15 @@ func (r *Repository) GetActionSummary(startDate, endDate string, predatorIDs []u
 		VariantName string
 	}
 
-	query := r.db.Table("PredatorHistory").
-		Select("action, SUM(quantity) as quantity, \"Predator\".name as variant_name").
-		Joins("JOIN \"Predator\" ON \"Predator\".id = \"PredatorHistory\".predator_id").
-		Where("datetime >= ? AND datetime <= ? AND is_active = true", startDate, endDate)
+	query := r.db.Table("Predator").
+		Select("ph.action, SUM(ph.quantity) as quantity, \"Predator\".name as variant_name").
+		Joins("LEFT JOIN \"PredatorHistory\" ph ON \"Predator\".id = ph.predator_id AND ph.datetime >= ? AND ph.datetime <= ? AND ph.is_active = true", startDate, endDate)
 
 	if len(predatorIDs) > 0 {
-		query = query.Where("predator_id IN ?", predatorIDs)
+		query = query.Where("\"Predator\".id IN ?", predatorIDs)
 	}
 
-	err := query.Group("action, \"Predator\".id, \"Predator\".name").
+	err := query.Group("ph.action, \"Predator\".id, \"Predator\".name").
 		Scan(&results).Error
 
 	if err != nil {
@@ -109,8 +108,7 @@ func (r *Repository) GetStockPaginated(date string, predatorIDs []uint, page, li
 	var count int64
 	countQuery := r.db.Table("Predator").
 		Select("COUNT(DISTINCT \"Predator\".id)").
-		Joins("JOIN \"PredatorHistory\" ph ON \"Predator\".id = ph.predator_id").
-		Where("ph.datetime <= ? AND ph.is_active = true", date)
+		Joins("LEFT JOIN \"PredatorHistory\" ph ON \"Predator\".id = ph.predator_id AND ph.datetime <= ? AND ph.is_active = true", date)
 	if len(predatorIDs) > 0 {
 		countQuery = countQuery.Where("\"Predator\".id IN ?", predatorIDs)
 	}
@@ -147,9 +145,8 @@ type variantRow struct {
 func (r *Repository) queryVariantRows(date string, predatorIDs []uint, offset, limit int) ([]variantRow, error) {
 	var results []variantRow
 	query := r.db.Table("Predator").
-		Select("\"Predator\".name, SUM(CASE WHEN ph.action = 'ADD' THEN ph.quantity ELSE -ph.quantity END) as quantity, MIN(CASE WHEN ph.action = 'ADD' THEN ph.datetime END) as oldest_date, MAX(CASE WHEN ph.action = 'ADD' THEN ph.datetime END) as youngest_date").
-		Joins("JOIN \"PredatorHistory\" ph ON \"Predator\".id = ph.predator_id").
-		Where("ph.datetime <= ? AND ph.is_active = true", date)
+		Select("\"Predator\".name, COALESCE(SUM(CASE WHEN ph.action = 'ADD' THEN ph.quantity WHEN ph.action = 'REMOVED' THEN -ph.quantity ELSE 0 END), 0) as quantity, MIN(CASE WHEN ph.action = 'ADD' THEN ph.datetime END) as oldest_date, MAX(CASE WHEN ph.action = 'ADD' THEN ph.datetime END) as youngest_date").
+		Joins("LEFT JOIN \"PredatorHistory\" ph ON \"Predator\".id = ph.predator_id AND ph.datetime <= ? AND ph.is_active = true", date)
 
 	if len(predatorIDs) > 0 {
 		query = query.Where("\"Predator\".id IN ?", predatorIDs)

@@ -85,8 +85,8 @@ func (s *Service) GetReport(q *model.PredatorPageQuery) (*model.PredatorPageResp
 	newStock.LastPeriodQuantity = prevNew.CurrentQuantity
 	newStock.GapPercentage = calcGap(newStock.CurrentQuantity, prevNew.CurrentQuantity)
 
-	removedStock := currActions["REMOVE"]
-	prevRemoved := prevActions["REMOVE"]
+	removedStock := currActions["REMOVED"]
+	prevRemoved := prevActions["REMOVED"]
 	removedStock.LastPeriodQuantity = prevRemoved.CurrentQuantity
 	removedStock.GapPercentage = calcGap(removedStock.CurrentQuantity, prevRemoved.CurrentQuantity)
 
