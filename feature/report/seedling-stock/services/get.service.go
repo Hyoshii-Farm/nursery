@@ -72,6 +72,19 @@ func (s *Service) GetReport(ctx context.Context, req model.SeedlingStockReportRe
 		return nil, err
 	}
 
+	// When Before is false, subtract the need quantities from available seed
+	// so the report reflects stock after fulfilling planned variant needs.
+	if !req.Before {
+		needMap := make(map[string]int)
+		for _, v := range seedByVariant {
+			needMap[v.VariantName] += v.NeedQuantity
+		}
+
+		for i := range availableSeed {
+			availableSeed[i].AvailableQuantity -= needMap[availableSeed[i].VariantName]
+		}
+	}
+
 	// History is fetched directly (not cached) because it's paginated
 	// and users expect real-time data when browsing history pages.
 	history, err := s.repo.GetHistory(req.StartDate, req.EndDate, req.VariantID, req.Page)

@@ -50,6 +50,54 @@ func (r *Repository) sumQuantity(
 	return total, err
 }
 
+func (r *Repository) getHighestLowestByAction(
+	action string,
+	start, end time.Time,
+) (int, string, int, string, error) {
+
+	type row struct {
+		VariantName string
+		Total       int
+	}
+
+	var rows []row
+
+	err := r.db.Table(`"SeedlingStock" s`).
+		Select(`
+			v.name AS variant_name,
+			SUM(s.quantity) AS total
+		`).
+		Joins(`JOIN "Variant" v ON v.id = s.variant_id`).
+		Where("s.action = ?", action).
+		Where("s.datetime BETWEEN ? AND ?", start, end).
+		Where("s.deleted_at IS NULL").
+		Where("s.is_active = TRUE").
+		Group("v.name").
+		Scan(&rows).Error
+
+	if err != nil || len(rows) == 0 {
+		return 0, "", 0, "", err
+	}
+
+	highestQty := rows[0].Total
+	lowestQty := rows[0].Total
+	highestName := rows[0].VariantName
+	lowestName := rows[0].VariantName
+
+	for _, r := range rows {
+		if r.Total > highestQty {
+			highestQty = r.Total
+			highestName = r.VariantName
+		}
+		if r.Total < lowestQty {
+			lowestQty = r.Total
+			lowestName = r.VariantName
+		}
+	}
+
+	return highestQty, highestName, lowestQty, lowestName, nil
+}
+
 // calcGap calculates the gap percentage between two values.
 func calcGap(current, last int64) float64 {
 	if last == 0 {
@@ -106,6 +154,17 @@ func (r *Repository) GetKPI(startDate, endDate string, variantIDs []uint, before
 		t.target.CurrentQuantity = int(current)
 		t.target.LastPeriodQuantity = int(last)
 		t.target.GapPercentage = calcGap(current, last)
+		highestQty, highestName, lowestQty, lowestName, err :=
+			r.getHighestLowestByAction(t.action, start, end)
+
+		if err != nil {
+			return kpi, err
+		}
+
+		t.target.HighestQuantity = highestQty
+		t.target.HighestName = highestName
+		t.target.LowestQuantity = lowestQty
+		t.target.LowestName = lowestName
 	}
 
 	return kpi, nil
