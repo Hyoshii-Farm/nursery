@@ -293,8 +293,8 @@ func (r *Repository) GetSeedByLocation(endDate string, variantIDs []uint, locati
 	for _, row := range rows {
 		remaining := remainingMap[row.VariantName]
 
-		deadlineDate := row.PlantingDate.AddDate(0, 0, deadlineDays)
-		daysLeft := int(deadlineDate.Sub(now).Hours() / 24)
+		nextPlantingDate := row.PlantingDate.AddDate(0, 0, deadlineDays)
+		daysLeft := int(nextPlantingDate.Sub(now).Hours() / 24)
 
 		gap := remaining - row.NeedQty
 
@@ -303,7 +303,7 @@ func (r *Repository) GetSeedByLocation(endDate string, variantIDs []uint, locati
 			NeedQuantity:      row.NeedQty,
 			AvailableQuantity: remaining,
 			GapQuantity:       gap,
-			PlantingDate:      row.PlantingDate.Format("2006-01-02"),
+			PlantingDate:      nextPlantingDate.Format("2006-01-02"),
 			Deadline:          daysLeft,
 		})
 
@@ -382,7 +382,7 @@ func (r *Repository) GetHistory(
 ) (model.History, error) {
 
 	var history model.History
-	var records []model.HistoryRecord
+	records := []model.HistoryRecord{}
 
 	if page == 0 {
 		page = 1
