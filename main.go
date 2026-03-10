@@ -45,7 +45,7 @@ func main() {
 
 	// Apply Auth middleware to all /api/v2 routes
 	api := app.Group("/api/v2")
-	feature.RegisterAll(api, db, redisClient)
+	feature.RegisterAll(api, db)
 
 	// Get port from environment variable or use default
 	port := os.Getenv("PORT")
